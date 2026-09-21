@@ -37,9 +37,16 @@ class PropertyBookingController extends Controller
     }
 
     // تحميل الملفات
+    // ✅ إصلاح: التعامل مع الحالتين — ملف واحد (object) أو عدة ملفات (array)
     $uploadedDocuments = [];
     if ($request->hasFile('required_documents')) {
-        foreach ($request->file('required_documents') as $file) {
+        $files = $request->file('required_documents');
+        $files = is_array($files) ? $files : [$files];
+
+        foreach ($files as $file) {
+            if (!$file || !$file->isValid()) {
+                continue;
+            }
             $filename = uniqid() . '.' . $file->getClientOriginalExtension();
             $file->storeAs('public/property_documents', $filename);
             $uploadedDocuments[] = url('storage/property_documents/' . $filename);

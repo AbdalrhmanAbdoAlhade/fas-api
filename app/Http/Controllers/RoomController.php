@@ -4,88 +4,135 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Room;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
 class RoomController extends Controller
 {
-public function store(Request $request)
-{
-    $validator = Validator::make($request->all(), [
-        'hotel_id' => 'required|exists:hotels,id',
-        'name' => 'required|string',
-       'cover_image' => 'required|image|max:20048',
-        'images.*'    => 'image|max:20048',
-        'details' => 'nullable|string',
-        'size' => 'nullable|string',
-        'facilities' => 'nullable|string',
-        'description' => 'nullable|string',
-        'floor_number' => 'nullable|string',
-        'room_number' => 'nullable|string',
-        'price_per_night' => 'required|numeric',
-    ]);
-
-    if ($validator->fails()) {
-        return response()->json(['errors' => $validator->errors()], 422);
-    }
-
-    // حفظ صورة الغلاف في المسار النسبي فقط
-    $coverImagePath = $request->file('cover_image')->store('rooms/covers', 'public');
-    $coverImagePath = '/' . $coverImagePath;  // إضافة /storage/ إلى المسار
-
-    // حفظ الصور الأخرى في المسار النسبي فقط
-    $images = [];
-    if ($request->hasFile('images')) {
-        foreach ($request->file('images') as $image) {
-            $path = $image->store('rooms/images', 'public');
-            $images[] = '/' . $path;  // إضافة /storage/ إلى المسار
+    /**
+     * helper: توحيد شكل الحقل المترجم
+     */
+    private function normalizeTranslation($value): array
+    {
+        if (is_array($value)) {
+            return array_filter([
+                'ar' => $value['ar'] ?? null,
+                'en' => $value['en'] ?? null,
+            ]);
         }
+
+        return [app()->getLocale() => $value];
     }
 
-    // إنشاء الغرفة
-    $room = Room::create([
-        'hotel_id' => $request->hotel_id,
-        'name' => $request->name,
-        'cover_image' => $coverImagePath, 
-        'images' => $images,              
-        'details' => $request->details,
-        'size' => $request->size,
-        'room_number' => $request->room_number,
-        'floor_number' => $request->floor_number,
-        'facilities' => $request->facilities,
-        'description' => $request->description,
-        'price_per_night' => $request->price_per_night,
-        
-    ]);
+    /* ============================================================
+     |  STORE
+     * ============================================================ */
+    public function store(Request $request)
+    {
+        $user = Auth::user();
 
-    return response()->json($room, 201);
-}
+        // ✅ مسموح لصاحب الفندق / شركة / أدمن / موظف عنده صلاحية hotels.create
+        $hasRoleAccess = in_array($user->role, ['hotel_owner', 'company_owner', 'admin']);
+        $hasPermissionAccess = $user->hasPermission('hotels.create');
 
+        if (!$hasRoleAccess && !$hasPermissionAccess) {
+            return response()->json(['message' => __('responses.unauthorized')], 403);
+        }
 
-public function index()
-{
-    $rooms = Room::with('hotel')->get();
+        $validator = Validator::make($request->all(), [
+            'hotel_id'        => 'required|exists:hotels,id',
+            'name'            => 'required',
+            'cover_image'     => 'required|image|max:20048',
+            'images.*'        => 'image|max:20048',
+            'details'         => 'nullable',
+            'size'            => 'nullable|string',
+            'facilities'      => 'nullable',
+            'description'     => 'nullable',
+            'floor_number'    => 'nullable|string',
+            'room_number'     => 'nullable|string',
+            'price_per_night' => 'required|numeric',
+        ]);
 
-    foreach ($rooms as $room) {
-        if (
-            $room->hotel &&
-            is_array($room->hotel->cover_image) &&
-            !empty($room->hotel->cover_image)
-        ) {
-            foreach ($room->hotel->cover_image as $key => $image) {
-                if (!str_starts_with($image, '/storage/')) {
-                    $room->hotel->cover_image[$key] = '/storage/' . $image;
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        $coverImagePath = $request->file('cover_image')->store('rooms/covers', 'public');
+        $coverImagePath = '/' . $coverImagePath;
+
+        $images = [];
+        if ($request->hasFile('images')) {
+            foreach ($request->file('images') as $image) {
+                $path = $image->store('rooms/images', 'public');
+                $images[] = '/' . $path;
+            }
+        }
+
+        // ✅ إنشاء الغرفة
+        $room = new Room();
+
+        $room->setTranslations('name', $this->normalizeTranslation($request->input('name')));
+
+        if ($request->filled('description')) {
+            $room->setTranslations('description', $this->normalizeTranslation($request->input('description')));
+        }
+
+        if ($request->filled('details')) {
+            $room->setTranslations('details', $this->normalizeTranslation($request->input('details')));
+        }
+
+        if ($request->filled('facilities')) {
+            $room->setTranslations('facilities', $this->normalizeTranslation($request->input('facilities')));
+        }
+
+        $room->hotel_id        = $request->hotel_id;
+        $room->cover_image     = $coverImagePath;
+        $room->images          = $images;
+        $room->size            = $request->size;
+        $room->room_number     = $request->room_number;
+        $room->floor_number    = $request->floor_number;
+        $room->price_per_night = $request->price_per_night;
+
+        $room->save();
+
+        return response()->json($room, 201);
+    }
+
+    /* ============================================================
+     |  INDEX
+     * ============================================================ */
+    public function index()
+    {
+        $rooms = Room::visibleTo(Auth::user())
+            ->with('hotel')
+            ->get();
+
+        foreach ($rooms as $room) {
+            if (
+                $room->hotel &&
+                is_array($room->hotel->cover_image) &&
+                !empty($room->hotel->cover_image)
+            ) {
+                foreach ($room->hotel->cover_image as $key => $image) {
+                    if (!str_starts_with($image, '/storage/')) {
+                        $room->hotel->cover_image[$key] = '/storage/' . $image;
+                    }
                 }
             }
         }
+
+        return response()->json($rooms);
     }
 
-    return response()->json($rooms);
-}
-
-
+    /* ============================================================
+     |  SHOW
+     * ============================================================ */
     public function show($id)
     {
-        $room = Room::with('hotel')->find($id);
+        $room = Room::visibleTo(Auth::user())
+            ->with('hotel')
+            ->find($id);
 
         if (!$room) {
             return response()->json(['error' => __('responses.room_not_found')], 404);
@@ -94,88 +141,160 @@ public function index()
         return response()->json($room);
     }
 
-public function update(Request $request, $id)
-{
-    $room = Room::find($id);
+    /* ============================================================
+     |  UPDATE
+     * ============================================================ */
+    public function update(Request $request, $id)
+    {
+        $room = Room::find($id);
 
-    if (!$room) {
-        return response()->json(['error' => __('responses.room_not_found')], 404);
-    }
-
-    $validator = Validator::make($request->all(), [
-        'name' => 'sometimes|required|string',
-'cover_image' => 'nullable|image|max:20048',
-'images.*'    => 'image|max:20048',
-        'details' => 'nullable|string',
-        'size' => 'nullable|string',
-        'facilities' => 'nullable|string',
-        'description' => 'nullable|string',
-        'price_per_night' => 'sometimes|required|numeric',
-        'floor_number' => 'nullable|string',
-        'room_number' => 'nullable|string',
-    ]);
-
-    if ($validator->fails()) {
-        return response()->json(['errors' => $validator->errors()], 422);
-    }
-
-    // تحديث صورة الكفر لو موجودة
-    if ($request->hasFile('cover_image')) {
-        $coverImagePath = $request->file('cover_image')->store('rooms/covers', 'public');
-        $room->cover_image = $coverImagePath;
-    }
-
-    // تحديث الصور الإضافية لو موجودة
-    if ($request->hasFile('images')) {
-        $images = [];
-        foreach ($request->file('images') as $image) {
-            $path = $image->store('rooms/images', 'public');
-            $images[] = $path;
+        if (!$room) {
+            return response()->json(['error' => __('responses.room_not_found')], 404);
         }
-        $room->images = $images;
+
+        $user = Auth::user();
+
+        // ✅ مسموح لصاحب الفندق / شركة / أدمن / موظف عنده صلاحية hotels.update
+        $hotelOwnerId = $room->hotel?->user_id;
+        $isOwner = ($hotelOwnerId === $user->id);
+        $hasPermissionAccess = $user->hasPermission('hotels.update');
+
+        if (!$isOwner && $user->role !== 'admin' && !$hasPermissionAccess) {
+            return response()->json(['message' => __('responses.unauthorized')], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'name'            => 'sometimes',
+            'cover_image'     => 'nullable|image|max:20048',
+            'images.*'        => 'image|max:20048',
+            'details'         => 'nullable',
+            'size'            => 'nullable|string',
+            'facilities'      => 'nullable',
+            'description'     => 'nullable',
+            'price_per_night' => 'sometimes|required|numeric',
+            'floor_number'    => 'nullable|string',
+            'room_number'     => 'nullable|string',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        // دمج الترجمات
+        if ($request->has('name')) {
+            $existing = $room->getTranslations('name');
+            $incoming = $this->normalizeTranslation($request->input('name'));
+            $room->setTranslations('name', array_merge($existing, $incoming));
+        }
+
+        if ($request->has('description')) {
+            $existing = $room->getTranslations('description');
+            $incoming = $this->normalizeTranslation($request->input('description'));
+            $room->setTranslations('description', array_merge($existing, $incoming));
+        }
+
+        if ($request->has('details')) {
+            $existing = $room->getTranslations('details');
+            $incoming = $this->normalizeTranslation($request->input('details'));
+            $room->setTranslations('details', array_merge($existing, $incoming));
+        }
+
+        if ($request->has('facilities')) {
+            $existing = $room->getTranslations('facilities');
+            $incoming = $this->normalizeTranslation($request->input('facilities'));
+            $room->setTranslations('facilities', array_merge($existing, $incoming));
+        }
+
+        // صورة الكفر
+        if ($request->hasFile('cover_image')) {
+            if ($room->cover_image) {
+                Storage::disk('public')->delete(ltrim($room->cover_image, '/'));
+            }
+            $coverImagePath = $request->file('cover_image')->store('rooms/covers', 'public');
+            $room->cover_image = '/' . $coverImagePath;
+        }
+
+        // الصور الإضافية
+        if ($request->hasFile('images')) {
+            if (is_array($room->images)) {
+                foreach ($room->images as $oldImage) {
+                    Storage::disk('public')->delete(ltrim($oldImage, '/'));
+                }
+            }
+
+            $images = [];
+            foreach ($request->file('images') as $image) {
+                $path = $image->store('rooms/images', 'public');
+                $images[] = '/' . $path;
+            }
+            $room->images = $images;
+        }
+
+        // باقي الحقول
+        $room->fill($request->only([
+            'size', 'room_number', 'floor_number', 'price_per_night',
+        ]));
+
+        $room->save();
+
+        return response()->json($room->fresh()->load('hotel'));
     }
 
-    // تحديث باقي الحقول
-    $room->fill($request->only([
-        'name', 'details', 'size', 'room_number', 'floor_number', 'facilities', 'description', 'price_per_night'
-    ]));
+    /* ============================================================
+     |  DESTROY
+     * ============================================================ */
+    public function destroy($id)
+    {
+        $room = Room::find($id);
 
-    $room->save();
+        if (!$room) {
+            return response()->json(['error' => __('responses.room_not_found')], 404);
+        }
 
-    return response()->json($room);
-}
+        $user = Auth::user();
 
+        // ✅ مسموح لصاحب الفندق / شركة / أدمن / موظف عنده صلاحية hotels.delete
+        $hotelOwnerId = $room->hotel?->user_id;
+        $isOwner = ($hotelOwnerId === $user->id);
+        $hasPermissionAccess = $user->hasPermission('hotels.delete');
 
-public function destroy($id)
-{
-    $room = Room::find($id);
+        if (!$isOwner && $user->role !== 'admin' && !$hasPermissionAccess) {
+            return response()->json(['message' => __('responses.unauthorized')], 403);
+        }
 
-    if (!$room) {
-        return response()->json(['error' => __('responses.room_not_found')], 404);
+        // حذف الصور
+        if ($room->cover_image) {
+            Storage::disk('public')->delete(ltrim($room->cover_image, '/'));
+        }
+        if (is_array($room->images)) {
+            foreach ($room->images as $img) {
+                Storage::disk('public')->delete(ltrim($img, '/'));
+            }
+        }
+
+        $room->delete();
+
+        return response()->json(['message' => __('responses.room_deleted')]);
     }
 
-    $room->delete();
+    /* ============================================================
+     |  Rooms by Hotel
+     * ============================================================ */
+    public function getRoomsByHotel($hotel_id)
+    {
+        $rooms = Room::visibleTo(Auth::user())
+            ->where('hotel_id', $hotel_id)
+            ->with('hotel')
+            ->get();
 
-    return response()->json(['message' => __('responses.room_deleted')]);
-}
+        if ($rooms->isEmpty()) {
+            return response()->json(['message' => __('responses.no_rooms_for_hotel')], 404);
+        }
 
-public function getRoomsByHotel($hotel_id)
-{
-    // التحقق من وجود الفندق
-    $rooms = Room::where('hotel_id', $hotel_id)
-                ->with('hotel')
-                ->get();
-
-    if ($rooms->isEmpty()) {
-        return response()->json(['message' => __('responses.no_rooms_for_hotel')], 404);
+        return response()->json([
+            'status'   => 'success',
+            'hotel_id' => $hotel_id,
+            'rooms'    => $rooms,
+        ], 200);
     }
-
-    return response()->json([
-        'status' => 'success',
-        'hotel_id' => $hotel_id,
-        'rooms' => $rooms
-    ], 200);
-}
-
-
 }

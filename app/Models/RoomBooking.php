@@ -39,10 +39,14 @@ class RoomBooking extends Model
         'qr_code_filename',
        'title',
        'date_of_birth',
+       'payment_method',
+       'paid_at',
     ];
     
     protected $casts = [
     'required_documents' => 'array',
+    'paid_at' => 'datetime',
+    
 ];
 
     

@@ -12,24 +12,26 @@ class OfferBooking extends Model
     protected $fillable = [
         'offer_id',
         'hotel_id',
+        'selected_hotel_id',         // ✅ الفندق المختار من العميل
+        'hotel_price_snapshot',      // ✅ لقطة سعر الفندق وقت الحجز
         'user_id',
+        'total_price',
         'name',
         'date_of_birth',
-        'qr_code_url',
         'national_id',
         'email',
         'phone',
-        'total_price',
         'room_password',
         'main_password',
         'status',
         'required_documents',
         'selected_options',
+        'qr_code_url',
     ];
 
     protected $casts = [
         'required_documents' => 'array',
-          'selected_options' => 'array',
+        'selected_options'   => 'array',
     ];
 
     public function offer()
@@ -42,11 +44,17 @@ class OfferBooking extends Model
         return $this->belongsTo(Hotel::class);
     }
 
+    // ✅ العلاقة الجديدة: الفندق الذي اختاره العميل فعلياً
+    public function selectedHotel()
+    {
+        return $this->belongsTo(Hotel::class, 'selected_hotel_id');
+    }
+
     public function user()
     {
         return $this->belongsTo(User::class);
     }
-    
+
     public function payments()
 {
     return $this->morphMany(Payment::class, 'booking');

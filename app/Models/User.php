@@ -7,13 +7,15 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use App\Models\Permission;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class User extends Authenticatable
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
 
-
+public const ROLE_EMPLOYEE = 'employee';
     public const ROLE_ADMIN = 'admin';
     public const ROLE_USER = 'user';
     public const ROLE_COORDINATOR = 'coordinator';
@@ -48,6 +50,7 @@ class User extends Authenticatable
         'address', // عنوان العقار التفصيلي
         'area', // المساحة (متر مربع)
         'rooms', // عدد الغرف
+        'locale',
     ];
 
     /**
@@ -112,4 +115,62 @@ class User extends Authenticatable
         // العلاقة صحيحة، وتعتمد على أن 'id' في جدول 'coordinators' هو المفتاح الأجنبي.
         return $this->hasOne(Coordinator::class);
     }
+    
+    // العلاقة مع الصلاحيات
+public function permissions(): BelongsToMany
+{
+    return $this->belongsToMany(Permission::class, 'user_permissions')
+        ->withPivot('granted_by', 'granted_at');
+}
+
+/**
+ * هل الموظف عنده صلاحية معينة؟
+ */
+public function hasPermission(string $permission): bool
+{
+    if ($this->role === self::ROLE_ADMIN) {
+        return true;
+    }
+
+    return $this->permissions()->where('name', $permission)->exists();
+}
+
+/**
+ * هل عنده أي صلاحية من القائمة؟
+ */
+public function hasAnyPermission(array $permissions): bool
+{
+    if ($this->role === self::ROLE_ADMIN) {
+        return true;
+    }
+
+    return $this->permissions()->whereIn('name', $permissions)->exists();
+}
+/**
+ * تحويل الموديل إلى مصفوفة مع إضافة الصلاحيات للموظف فقط.
+ */
+public function toArray(): array
+{
+    $data = parent::toArray();
+
+    // لو المستخدم موظف، نرجع معاه الصلاحيات
+    if ($this->role === self::ROLE_EMPLOYEE) {
+        $this->loadMissing('permissions');
+
+        // لو عايز ترجع أسماء الصلاحيات فقط
+        $data['permissions'] = $this->permissions->pluck('name')->values();
+
+        // ولو عايز ترجع بيانات الصلاحية كاملة (id, name, ...)
+        // $data['permissions'] = $this->permissions;
+    }
+
+    return $data;
+}
+/**
+ * هل هو موظف؟
+ */
+public function isEmployee(): bool
+{
+    return $this->role === self::ROLE_EMPLOYEE;
+}
 }

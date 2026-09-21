@@ -27,7 +27,7 @@ public function store(Request $request)
 {
     $validator = Validator::make($request->all(), [
         'name' => 'required|string|max:255',
-        'image' => 'required|image|mimes:jpeg,png,jpg|max:2048',
+        'image' => 'required|image|mimes:jpeg,png,jpg,webp|max:2048',
         'status' => 'nullable|string',
     ]);
 
@@ -81,7 +81,7 @@ public function update(Request $request, $id)
 
     $validator = Validator::make($request->all(), [
         'name' => 'sometimes|string|max:255',
-        'image' => 'nullable|image|mimes:jpeg,png,jpg|max:2048',
+        'image' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:2048',
         'status' => 'sometimes|string',
     ]);
 
