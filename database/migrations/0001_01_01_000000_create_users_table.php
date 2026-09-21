@@ -25,6 +25,7 @@ return new class extends Migration
             $table->string('tax_certificate')->nullable(); // شهادة ضريبة (ملف)
             $table->string('ownership_deed')->nullable(); // صك الملكية (ملف)
             $table->string('commercial_register')->nullable(); // السجل التجاري (ملف)
+            $table->string('locale', 5)->nullable()->default('ar');
             $table->string('property_type')->nullable(); // نوع العقار
             $table->string('city')->nullable(); // المدينة
             $table->text('address')->nullable(); // عنوان العقار التفصيلي

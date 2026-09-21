@@ -8,7 +8,7 @@ return [
     'not_found' => 'العنصر المطلوب غير موجود.',
     'updated_successfully' => 'تم التحديث بنجاح.',
     'deleted_successfully' => 'تم الحذف بنجاح.',
-
+    'admin_booking_created' => 'تم إنشاء الحجز بنجاح من لوحة التحكم.',
     // Bookings
     'booking_not_found' => 'الحجز غير موجود.',
     'no_bookings_for_hotel' => 'لا توجد حجوزات حالياً لهذا الفندق.',
@@ -150,10 +150,47 @@ return [
     'booking_deleted' => 'تم حذف الحجز بنجاح.',
     'booking_updated' => 'تم تحديث بيانات الحجز بنجاح.',
     'unauthorized_booking_status_update' => 'غير مصرح لك بتعديل حالة هذا الحجز.',
+    // ✅ Approval messages
+'hotel_approved'    => 'تم قبول الفندق بنجاح.',
+'hotel_rejected'    => 'تم رفض الفندق.',
+'property_approved' => 'تم قبول العقار بنجاح.',
+'property_rejected' => 'تم رفض العقار.',
+'company_approved'  => 'تم قبول الشركة بنجاح.',
+'company_rejected'  => 'تم رفض الشركة.',
 
     // Offers
     'unauthorized_offer_creation' => 'غير مصرح لك بإنشاء عرض.',
     'unauthorized_offer_update' => 'غير مصرح لك بتعديل هذا العرض.',
     'unauthorized_offer_delete' => 'غير مصرح لك بحذف هذا العرض.',
     'offer_deleted' => 'تم حذف العرض بنجاح.',
+    'offer_not_found' => 'العرض غير موجود.',
+
+    // ============================================================
+    // Pay on Arrival (جديد)
+    // ============================================================
+    'pay_on_arrival_not_available_for_this_hotel' => 'خدمة الدفع عند الوصول غير متاحة لهذا الفندق.',
+    'booking_confirmed_pay_on_arrival' => 'تم تأكيد الحجز بنجاح. الدفع عند الوصول.',
+    'only_on_arrival_bookings_can_be_marked' => 'هذا الإجراء متاح فقط لحجوزات الدفع عند الوصول.',
+    'booking_already_paid' => 'هذا الحجز مدفوع بالفعل.',
+    'cannot_pay_cancelled_booking' => 'لا يمكن تأكيد الدفع لحجز ملغي.',
+    'booking_marked_as_paid' => 'تم تأكيد الدفع بنجاح. تم توليد رمز QR.',
+
+    // ============================================================
+    // Employees & Permissions (جديد)
+    // ============================================================
+    'employee_not_found' => 'الموظف غير موجود.',
+    'employee_created_successfully' => 'تم إنشاء الموظف بنجاح.',
+    'employee_updated_successfully' => 'تم تحديث بيانات الموظف بنجاح.',
+    'employee_deleted_successfully' => 'تم حذف الموظف بنجاح.',
+    'permissions_assigned_successfully' => 'تم تعيين الصلاحيات بنجاح.',
+    'all_permissions_revoked' => 'تم إزالة كل الصلاحيات.',
+
+    // ============================================================
+    // Blocking (جديد)
+    // ============================================================
+    'item_not_found' => 'العنصر غير موجود.',
+    'item_already_blocked' => 'هذا العنصر محظور بالفعل.',
+    'item_not_blocked' => 'هذا العنصر غير محظور.',
+    'item_blocked_successfully' => 'تم حظر العنصر بنجاح.',
+    'item_unblocked_successfully' => 'تم فك الحظر بنجاح.',
 ];

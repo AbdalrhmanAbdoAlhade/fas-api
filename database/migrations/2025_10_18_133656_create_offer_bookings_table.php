@@ -18,6 +18,13 @@ return new class extends Migration {
             $table->string('email');
             $table->string('phone');
             $table->decimal('total_price', 10, 2)->nullable();
+            
+            // حقول الخصم المُضافة
+            $table->enum('discount_type', ['percentage', 'fixed'])->nullable();
+            $table->decimal('discount_value', 10, 2)->nullable();
+            $table->timestamp('discount_starts_at')->nullable();
+            $table->timestamp('discount_ends_at')->nullable();
+
             $table->string('room_password');
             $table->string('main_password');
             $table->enum('status', ['pending', 'confirmed', 'paid', 'cancelled'])->default('pending');

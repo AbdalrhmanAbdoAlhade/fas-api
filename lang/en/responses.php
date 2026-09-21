@@ -8,7 +8,7 @@ return [
     'not_found' => 'The requested item was not found.',
     'updated_successfully' => 'Updated successfully.',
     'deleted_successfully' => 'Deleted successfully.',
-
+'admin_booking_created' => 'Booking created successfully from admin panel.',
     // Bookings
     'booking_not_found' => 'Booking not found.',
     'no_bookings_for_hotel' => 'There are currently no bookings for this hotel.',
@@ -25,6 +25,13 @@ return [
     'completed_bookings_retrieved' => 'Completed bookings retrieved successfully.',
     'cancelled_bookings_retrieved' => 'Canceled bookings retrieved successfully.',
     'status_updated_successfully' => 'Booking status updated successfully.',
+
+   'hotel_approved'    => 'Hotel approved successfully.',
+'hotel_rejected'    => 'Hotel rejected.',
+'property_approved' => 'Property approved successfully.',
+'property_rejected' => 'Property rejected.',
+'company_approved'  => 'Company approved successfully.',
+'company_rejected'  => 'Company rejected.',
 
     // Auth & Users
     'otp_sent' => 'OTP sent successfully.',
@@ -156,4 +163,34 @@ return [
     'unauthorized_offer_update' => 'You are not authorized to update this offer.',
     'unauthorized_offer_delete' => 'You are not authorized to delete this offer.',
     'offer_deleted' => 'Offer deleted successfully.',
+    'offer_not_found' => 'Offer not found.',
+
+    // ============================================================
+    // Pay on Arrival
+    // ============================================================
+    'pay_on_arrival_not_available_for_this_hotel' => 'Pay on arrival is not available for this hotel.',
+    'booking_confirmed_pay_on_arrival' => 'Booking confirmed successfully. Pay on arrival.',
+    'only_on_arrival_bookings_can_be_marked' => 'This action is only available for pay-on-arrival bookings.',
+    'booking_already_paid' => 'This booking is already paid.',
+    'cannot_pay_cancelled_booking' => 'Cannot mark a cancelled booking as paid.',
+    'booking_marked_as_paid' => 'Payment confirmed successfully. QR code generated.',
+
+    // ============================================================
+    // Employees & Permissions
+    // ============================================================
+    'employee_not_found' => 'Employee not found.',
+    'employee_created_successfully' => 'Employee created successfully.',
+    'employee_updated_successfully' => 'Employee updated successfully.',
+    'employee_deleted_successfully' => 'Employee deleted successfully.',
+    'permissions_assigned_successfully' => 'Permissions assigned successfully.',
+    'all_permissions_revoked' => 'All permissions revoked.',
+
+    // ============================================================
+    // Blocking
+    // ============================================================
+    'item_not_found' => 'Item not found.',
+    'item_already_blocked' => 'This item is already blocked.',
+    'item_not_blocked' => 'This item is not blocked.',
+    'item_blocked_successfully' => 'Item blocked successfully.',
+    'item_unblocked_successfully' => 'Item unblocked successfully.',
 ];

@@ -18,18 +18,35 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        //
+        // ✅ مفيش redirect لـ login — رجّع 401 JSON
+        $middleware->redirectGuestsTo(fn () => null);
+
+        // Permission middleware alias
+        $middleware->alias([
+            'permission' => \App\Http\Middleware\CheckPermission::class,
+        ]);
+
         $middleware->api(append: [
             SetLocale::class,
         ]);
     })
-
     ->withExceptions(function (Exceptions $exceptions) {
+
+        // ✅ Authentication Exception → 401 JSON
+        $exceptions->render(function (AuthenticationException $e, $request) {
+            if ($request->expectsJson() || $request->is('api/*')) {
+                return response()->json([
+                    'status'  => false,
+                    'message' => __('responses.unauthenticated'),
+                ], 401);
+            }
+        });
+
         // إذا التوكن منتهي
         $exceptions->render(function (TokenExpiredException $e, $request) {
             return response()->json([
                 'message' => __('auth.token_expired'),
-                'status' => 401
+                'status'  => 401
             ], 401);
         });
 
@@ -37,15 +54,15 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->render(function (TokenInvalidException $e, $request) {
             return response()->json([
                 'message' => __('auth.token_invalid'),
-                'status' => 401
+                'status'  => 401
             ], 401);
         });
 
         // إذا لا يوجد توكن مرسل
-        $exceptions->render(function (AuthenticationException  $e, $request) {
+        $exceptions->render(function (AuthenticationException $e, $request) {
             return response()->json([
                 'message' => __('auth.token_not_provided'),
-                'status' => 401
+                'status'  => 401
             ], 401);
         });
 
@@ -53,16 +70,19 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->render(function (UnauthorizedHttpException $e, $request) {
             return response()->json([
                 'message' => __('responses.unauthorized'),
-                'status' => 401
+                'status'  => 401
             ], 401);
         });
 
         // إذا لم يتم العثور على Route معينة
         $exceptions->render(function (RouteNotFoundException $e, $request) {
-            return response()->json([
-                'message' => __('general.route_not_found'),
-                'status' => 401
-            ], 401);
+            // ✅ لو الطلب API، رجّع 404 JSON مش 401
+            if ($request->is('api/*') || $request->expectsJson()) {
+                return response()->json([
+                    'status'  => false,
+                    'message' => __('general.route_not_found', [], 'ar') ?: 'Route not found',
+                ], 404);
+            }
         });
     })
     ->create();
