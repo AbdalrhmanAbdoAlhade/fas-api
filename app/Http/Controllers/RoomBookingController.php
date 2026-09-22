@@ -21,7 +21,7 @@ use Illuminate\Support\Facades\Log;
 class RoomBookingController extends Controller
 {
     /* ============================================================
-     |  Helper: send notification safely (never breaks main flow)
+     |  Helper: send notification safely
      * ============================================================ */
     private function safeNotify(callable $callback): void
     {
@@ -30,6 +30,23 @@ class RoomBookingController extends Controller
         } catch (\Exception $e) {
             Log::warning('Notification failed: ' . $e->getMessage());
         }
+    }
+
+    /* ============================================================
+     |  Helper: حساب عدد الغرف المحجوزة من نوع معين في فترة معينة
+     * ============================================================ */
+    private function getBookedRoomsCount($roomId, $startDate, $endDate, $excludeBookingId = null)
+    {
+        $query = RoomBooking::where('room_id', $roomId)
+            ->where('status', '!=', 'cancelled')
+            ->where('start_date', '<', $endDate)
+            ->where('end_date', '>', $startDate);
+
+        if ($excludeBookingId) {
+            $query->where('id', '!=', $excludeBookingId);
+        }
+
+        return $query->sum('number_of_rooms');
     }
 
     /* ============================================================
@@ -85,178 +102,172 @@ class RoomBookingController extends Controller
     /* ============================================================
      |  Book Room
      * ============================================================ */
-public function book(Request $request)
-{
-    $validator = Validator::make($request->all(), [
-        'room_id'              => 'required|exists:rooms,id',
-        'required_documents.*' => 'nullable|file|mimes:jpg,jpeg,png,pdf,doc,docx|max:5120',
-        'start_date'           => 'required|date|after_or_equal:today',
-        'end_date'             => 'required|date|after:start_date',
-        'number_of_rooms'      => 'nullable|integer|min:1',
-        'number_of_guests'     => 'nullable|integer|min:1',
-        'adults'               => 'required|integer|min:0',
-        'children'             => 'required|integer|min:0',
-        'name'                 => 'required|string',
-        'date_of_birth'        => 'required|string',
-        'national_id'          => 'required|string',
-        'email'                => 'required|email',
-        'phone'                => 'required|string',
-        'title'                => 'required|in:Mr,Mrs,Miss',
-        'payment_method'       => 'nullable|in:online,on_arrival',
-    ]);
+    public function book(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'room_id'              => 'required|exists:rooms,id',
+            'required_documents.*' => 'nullable|file|mimes:jpg,jpeg,png,pdf,doc,docx|max:5120',
+            'start_date'           => 'required|date|after_or_equal:today',
+            'end_date'             => 'required|date|after:start_date',
+            'number_of_rooms'      => 'nullable|integer|min:1',
+            'number_of_guests'     => 'nullable|integer|min:1',
+            'adults'               => 'required|integer|min:0',
+            'children'             => 'required|integer|min:0',
+            'name'                 => 'required|string',
+            'date_of_birth'        => 'required|string',
+            'national_id'          => 'required|string',
+            'email'                => 'required|email',
+            'phone'                => 'required|string',
+            'title'                => 'required|in:Mr,Mrs,Miss',
+            'payment_method'       => 'nullable|in:online,on_arrival',
+        ]);
 
-    if ($validator->fails()) {
-        return response()->json(['errors' => $validator->errors()], 422);
-    }
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
 
-    $room  = Room::with('hotel')->findOrFail($request->room_id);
-    $hotel = $room->hotel;
+        $room  = Room::with('hotel')->findOrFail($request->room_id);
+        $hotel = $room->hotel;
 
-    if (!$hotel) {
-        return response()->json(['message' => __('responses.room_not_linked_to_hotel')], 404);
-    }
+        if (!$hotel) {
+            return response()->json(['message' => __('responses.room_not_linked_to_hotel')], 404);
+        }
 
-    // طريقة الدفع + التحقق من صلاحية "الدفع عند الوصول"
-    $paymentMethod = $request->input('payment_method', 'online');
+        // طريقة الدفع
+        $paymentMethod = $request->input('payment_method', 'online');
 
-    if ($paymentMethod === 'on_arrival' && !$hotel->pay_on_arrival_enabled) {
-        return response()->json([
-            'status'  => false,
-            'message' => __('responses.pay_on_arrival_not_available_for_this_hotel'),
-        ], 422);
-    }
-
-    $numberOfRooms = $request->number_of_rooms ?? 1;
-
-    // ============================================================
-    // 1. التحقق من الكمية المتاحة (الناقص الأساسي)
-    // ============================================================
-    $bookedCount = RoomBooking::where('room_id', $room->id)
-        ->where('status', '!=', 'cancelled')
-        ->where(function ($q) use ($request) {
-            $q->whereBetween('start_date', [$request->start_date, $request->end_date])
-              ->orWhereBetween('end_date', [$request->start_date, $request->end_date])
-              ->orWhere(function ($q2) use ($request) {
-                  $q2->where('start_date', '<=', $request->start_date)
-                     ->where('end_date', '>=', $request->end_date);
-              });
-        })
-        ->sum('number_of_rooms');
-
-    if (($bookedCount + $numberOfRooms) > $room->quantity) {
-        return response()->json([
-            'status'  => false,
-            'message' => 'لا يوجد عدد كافٍ من الغرف المتاحة من هذا النوع في الفترة المحددة. المتاح حالياً: ' . max(0, $room->quantity - $bookedCount),
-        ], 422);
-    }
-
-    // ============================================================
-    // 2. التحقق من max_occupancy (اختياري لكن مهم)
-    // ============================================================
-    if ($room->max_occupancy) {
-        $totalGuests = ($request->adults ?? 0) + ($request->children ?? 0);
-        if ($totalGuests > ($room->max_occupancy * $numberOfRooms)) {
+        if ($paymentMethod === 'on_arrival' && !$hotel->pay_on_arrival_enabled) {
             return response()->json([
                 'status'  => false,
-                'message' => 'عدد الضيوف أكبر من السعة المسموح بها لهذا النوع من الغرف',
+                'message' => __('responses.pay_on_arrival_not_available_for_this_hotel'),
             ], 422);
         }
-    }
 
-    // حساب السعر
-    $days       = Carbon::parse($request->start_date)->diffInDays(Carbon::parse($request->end_date)) ?: 1;
-    $totalPrice = $days * $room->price_per_night * $numberOfRooms;
+        $numberOfRooms = $request->number_of_rooms ?? 1;
 
-    // رفع الملفات
-    $uploadedDocuments = [];
-    if ($request->hasFile('required_documents')) {
-        foreach ($request->file('required_documents') as $file) {
-            $filename = uniqid() . '.' . $file->getClientOriginalExtension();
-            $file->storeAs('public/required_documents', $filename);
-            $uploadedDocuments[] = url('storage/required_documents/' . $filename);
+        // ============================================================
+        // 1. التحقق من الكمية المتاحة
+        // ============================================================
+        $bookedCount = $this->getBookedRoomsCount(
+            $room->id,
+            $request->start_date,
+            $request->end_date
+        );
+
+        if (($bookedCount + $numberOfRooms) > $room->quantity) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'لا يوجد عدد كافٍ من الغرف المتاحة من هذا النوع في الفترة المحددة. المتاح حالياً: ' . max(0, $room->quantity - $bookedCount),
+            ], 422);
+        }
+
+        // ============================================================
+        // 2. التحقق من max_occupancy
+        // ============================================================
+        if ($room->max_occupancy) {
+            $totalGuests = ($request->adults ?? 0) + ($request->children ?? 0);
+            if ($totalGuests > ($room->max_occupancy * $numberOfRooms)) {
+                return response()->json([
+                    'status'  => false,
+                    'message' => 'عدد الضيوف أكبر من السعة المسموح بها لهذا النوع من الغرف',
+                ], 422);
+            }
+        }
+
+        // حساب السعر
+        $days       = Carbon::parse($request->start_date)->diffInDays(Carbon::parse($request->end_date)) ?: 1;
+        $totalPrice = $days * $room->price_per_night * $numberOfRooms;
+
+        // رفع الملفات
+        $uploadedDocuments = [];
+        if ($request->hasFile('required_documents')) {
+            foreach ($request->file('required_documents') as $file) {
+                $filename = uniqid() . '.' . $file->getClientOriginalExtension();
+                $file->storeAs('public/required_documents', $filename);
+                $uploadedDocuments[] = url('storage/required_documents/' . $filename);
+            }
+        }
+
+        // توليد الباسوردات
+        $roomPassword = strtoupper('NL' . rand(1000, 9999)) . '@';
+        $mainPassword = strtoupper('GH' . rand(100, 999)) . '!@' . rand(1, 9);
+
+        // الحالة الابتدائية
+        $initialStatus = ($paymentMethod === 'on_arrival') ? 'confirmed' : 'pending';
+
+        // إنشاء الحجز
+        $booking = RoomBooking::create([
+            'uuid'               => (string) Str::uuid(),
+            'room_id'            => $room->id,
+            'hotel_id'           => $hotel->id,
+            'user_id'            => Auth::id(),
+            'start_date'         => $request->start_date,
+            'end_date'           => $request->end_date,
+            'number_of_rooms'    => $numberOfRooms,
+            'number_of_guests'   => $request->number_of_guests,
+            'adults'             => $request->adults,
+            'children'           => $request->children,
+            'total_price'        => $totalPrice,
+            'name'               => $request->name,
+            'date_of_birth'      => $request->date_of_birth,
+            'national_id'        => $request->national_id,
+            'email'              => $request->email,
+            'phone'              => $request->phone,
+            'title'              => $request->title,
+            'room_number'        => $room->room_number,
+            'floor_number'       => $room->floor_number,
+            'room_password'      => $roomPassword,
+            'main_password'      => $mainPassword,
+            'status'             => $initialStatus,
+            'payment_method'     => $paymentMethod,
+            'required_documents' => $uploadedDocuments,
+        ]);
+
+        // إشعار صاحب الفندق
+        $this->safeNotify(function () use ($booking) {
+            app(BookingNotificationService::class)->notifyOwnerNewRoomBooking($booking);
+        });
+
+        // دفع عند الوصول
+        if ($paymentMethod === 'on_arrival') {
+            return response()->json([
+                'status'         => true,
+                'message'        => __('responses.booking_confirmed_pay_on_arrival'),
+                'booking_id'     => $booking->id,
+                'payment_method' => 'on_arrival',
+                'payment_status' => 'unpaid',
+                'total_price'    => $totalPrice,
+                'redirect_url'   => null,
+            ], 201);
+        }
+
+        // دفع أونلاين
+        try {
+            $paymentResult = app(\App\Services\EdfaPayService::class)->initiatePayment([
+                'booking_id'   => $booking->id,
+                'booking_type' => get_class($booking),
+                'amount'       => $totalPrice,
+                'email'        => $request->email,
+                'phone'        => $request->phone,
+                'first_name'   => $request->name,
+                'last_name'    => $request->name,
+            ]);
+
+            return response()->json([
+                'status'         => true,
+                'message'        => __('responses.booking_successful_payment_pending'),
+                'booking_id'     => $booking->id,
+                'payment_method' => 'online',
+                'redirect_url'   => $paymentResult['redirect_url'],
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status'  => false,
+                'message' => __('responses.booking_creation_payment_failed', ['error' => $e->getMessage()]),
+            ], 500);
         }
     }
-
-    // توليد الباسوردات
-    $roomPassword = strtoupper('NL' . rand(1000, 9999)) . '@';
-    $mainPassword = strtoupper('GH' . rand(100, 999)) . '!@' . rand(1, 9);
-
-    // الحالة الابتدائية
-    $initialStatus = ($paymentMethod === 'on_arrival') ? 'confirmed' : 'pending';
-
-    // إنشاء الحجز
-    $booking = RoomBooking::create([
-        'uuid'               => (string) Str::uuid(),
-        'room_id'            => $room->id,
-        'hotel_id'           => $hotel->id,
-        'user_id'            => Auth::id(),
-        'start_date'         => $request->start_date,
-        'end_date'           => $request->end_date,
-        'number_of_rooms'    => $numberOfRooms,
-        'number_of_guests'   => $request->number_of_guests,
-        'adults'             => $request->adults,
-        'children'           => $request->children,
-        'total_price'        => $totalPrice,
-        'name'               => $request->name,
-        'date_of_birth'      => $request->date_of_birth,
-        'national_id'        => $request->national_id,
-        'email'              => $request->email,
-        'phone'              => $request->phone,
-        'title'              => $request->title,
-        'room_number'        => $room->room_number,
-        'floor_number'       => $room->floor_number,
-        'room_password'      => $roomPassword,
-        'main_password'      => $mainPassword,
-        'status'             => $initialStatus,
-        'payment_method'     => $paymentMethod,
-        'required_documents' => $uploadedDocuments,
-    ]);
-
-    // إشعار صاحب الفندق
-    $this->safeNotify(function () use ($booking) {
-        app(BookingNotificationService::class)->notifyOwnerNewRoomBooking($booking);
-    });
-
-    // دفع عند الوصول
-    if ($paymentMethod === 'on_arrival') {
-        return response()->json([
-            'status'         => true,
-            'message'        => __('responses.booking_confirmed_pay_on_arrival'),
-            'booking_id'     => $booking->id,
-            'payment_method' => 'on_arrival',
-            'payment_status' => 'unpaid',
-            'total_price'    => $totalPrice,
-            'redirect_url'   => null,
-        ], 201);
-    }
-
-    // دفع أونلاين
-    try {
-        $paymentResult = app(\App\Services\EdfaPayService::class)->initiatePayment([
-            'booking_id'   => $booking->id,
-            'booking_type' => get_class($booking),
-            'amount'       => $totalPrice,
-            'email'        => $request->email,
-            'phone'        => $request->phone,
-            'first_name'   => $request->name,
-            'last_name'    => $request->name,
-        ]);
-
-        return response()->json([
-            'status'         => true,
-            'message'        => __('responses.booking_successful_payment_pending'),
-            'booking_id'     => $booking->id,
-            'payment_method' => 'online',
-            'redirect_url'   => $paymentResult['redirect_url'],
-        ]);
-
-    } catch (\Exception $e) {
-        return response()->json([
-            'status'  => false,
-            'message' => __('responses.booking_creation_payment_failed', ['error' => $e->getMessage()]),
-        ], 500);
-    }
-}
 
     /* ============================================================
      |  Update Booking
@@ -285,17 +296,57 @@ public function book(Request $request)
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
+        $newRoomId        = $request->input('room_id', $booking->room_id);
+        $newStartDate     = $request->input('start_date', $booking->start_date);
+        $newEndDate       = $request->input('end_date', $booking->end_date);
+        $newNumberOfRooms = $request->input('number_of_rooms', $booking->number_of_rooms);
+
+        // التحقق من التوفر لو اتغير شيء مؤثر
+        if ($request->hasAny(['room_id', 'start_date', 'end_date', 'number_of_rooms'])) {
+
+            $room = Room::findOrFail($newRoomId);
+
+            $bookedCount = $this->getBookedRoomsCount(
+                $newRoomId,
+                $newStartDate,
+                $newEndDate,
+                $booking->id
+            );
+
+            if (($bookedCount + $newNumberOfRooms) > $room->quantity) {
+                return response()->json([
+                    'status'  => false,
+                    'message' => 'لا يوجد عدد كافٍ من الغرف المتاحة من هذا النوع في الفترة المحددة. المتاح حالياً: ' . max(0, $room->quantity - $bookedCount),
+                ], 422);
+            }
+
+            // التحقق من max_occupancy
+            if ($room->max_occupancy) {
+                $adults   = $request->input('adults', $booking->adults);
+                $children = $request->input('children', $booking->children);
+                $totalGuests = $adults + $children;
+
+                if ($totalGuests > ($room->max_occupancy * $newNumberOfRooms)) {
+                    return response()->json([
+                        'status'  => false,
+                        'message' => 'عدد الضيوف أكبر من السعة المسموح بها لهذا النوع من الغرف',
+                    ], 422);
+                }
+            }
+        }
+
         $booking->fill($request->only([
             'room_id', 'start_date', 'end_date', 'number_of_rooms',
             'number_of_guests', 'adults', 'children', 'name', 'national_id',
             'email', 'phone', 'room_number', 'floor_number',
         ]));
 
+        // إعادة حساب السعر
         if ($booking->isDirty(['room_id', 'start_date', 'end_date', 'number_of_rooms'])) {
             $room  = Room::with('hotel')->find($booking->room_id);
             $start = Carbon::parse($booking->start_date);
             $end   = Carbon::parse($booking->end_date);
-            $days  = $start->diffInDays($end);
+            $days  = $start->diffInDays($end) ?: 1;
             $booking->total_price = $days * $room->price_per_night * $booking->number_of_rooms;
         }
 
@@ -356,7 +407,6 @@ public function book(Request $request)
         $booking->paid_at = now();
         $booking->save();
 
-        // ✅ إشعار العميل
         $this->safeNotify(function () use ($booking) {
             app(BookingNotificationService::class)->notifyCustomerPaymentConfirmed($booking);
         });
@@ -370,58 +420,53 @@ public function book(Request $request)
     /* ============================================================
      |  Cancel Booking
      * ============================================================ */
-  public function cancelBooking()
-{
-    $user = auth('sanctum')->user();
+    public function cancelBooking()
+    {
+        $user = auth('sanctum')->user();
 
-    if (!$user) {
+        if (!$user) {
+            return response()->json([
+                'status'  => false,
+                'message' => __('responses.unauthenticated'),
+            ], 401);
+        }
+
+        $booking = RoomBooking::where('user_id', $user->id)
+            ->where(function ($q) {
+                $q->where('status', 'pending')
+                  ->orWhere(function ($q2) {
+                      $q2->where('status', 'confirmed')
+                         ->where('payment_method', 'on_arrival')
+                         ->whereNull('paid_at');
+                  });
+            })
+            ->latest()
+            ->first();
+
+        if (!$booking) {
+            return response()->json([
+                'message' => __('responses.no_pending_booking_to_cancel'),
+            ], 404);
+        }
+
+        if ($booking->status === 'paid' || $booking->paid_at) {
+            return response()->json([
+                'message' => __('responses.cannot_cancel_confirmed_booking'),
+            ], 403);
+        }
+
+        $booking->status = 'cancelled';
+        $booking->save();
+
+        $this->safeNotify(function () use ($booking) {
+            app(BookingNotificationService::class)->notifyOwnerNewRoomBooking($booking);
+        });
+
         return response()->json([
-            'status'  => false,
-            'message' => __('responses.unauthenticated'),
-        ], 401);
+            'message' => __('responses.booking_cancelled_successfully'),
+            'status'  => $booking->status,
+        ]);
     }
-
-    // ✅ نجيب أول حجز "قابل للإلغاء" للمستخدم
-    // - pending (أي طريقة دفع)
-    // - confirmed + on_arrival (لسه ما دفعش)
-    $booking = RoomBooking::where('user_id', $user->id)
-        ->where(function ($q) {
-            $q->where('status', 'pending')
-              ->orWhere(function ($q2) {
-                  $q2->where('status', 'confirmed')
-                     ->where('payment_method', 'on_arrival')
-                     ->whereNull('paid_at');
-              });
-        })
-        ->latest()
-        ->first();
-
-    if (!$booking) {
-        return response()->json([
-            'message' => __('responses.no_pending_booking_to_cancel'),
-        ], 404);
-    }
-
-    // ✅ لو اتدفع خلاص → ممنوع الإلغاء
-    if ($booking->status === 'paid' || $booking->paid_at) {
-        return response()->json([
-            'message' => __('responses.cannot_cancel_confirmed_booking'),
-        ], 403);
-    }
-
-    $booking->status = 'cancelled';
-    $booking->save();
-
-    // ✅ إشعار صاحب الفندق بالإلغاء
-    $this->safeNotify(function () use ($booking) {
-        app(BookingNotificationService::class)->notifyOwnerNewRoomBooking($booking);
-    });
-
-    return response()->json([
-        'message' => __('responses.booking_cancelled_successfully'),
-        'status'  => $booking->status,
-    ]);
-}
 
     /* ============================================================
      |  Destroy
@@ -478,6 +523,7 @@ public function book(Request $request)
     public function getRoomBookings($roomId)
     {
         $room = Room::find($roomId);
+
         if (!$room) {
             return response()->json([
                 'status'  => false,
@@ -519,7 +565,7 @@ public function book(Request $request)
     }
 
     /* ============================================================
-     |  Ongoing Bookings (pending + confirmed)
+     |  Ongoing Bookings
      * ============================================================ */
     public function ongoingBookings()
     {
@@ -549,7 +595,7 @@ public function book(Request $request)
     }
 
     /* ============================================================
-     |  Completed Bookings (paid)
+     |  Completed Bookings
      * ============================================================ */
     public function completedBookings()
     {
@@ -639,7 +685,6 @@ public function book(Request $request)
 
         $fileName = 'qr_' . uniqid() . '.png';
         $path     = 'public/qrcodes/' . $fileName;
-
         QrCode::format('png')->size(300)->encoding('UTF-8')->generate($qrContent, storage_path('app/' . $path));
 
         $bookingData = $booking->toArray();
@@ -650,7 +695,7 @@ public function book(Request $request)
     }
 
     /* ============================================================
-     |  Update Booking Status (hotel owner / admin)
+     |  Update Booking Status
      * ============================================================ */
     public function updateBookingStatus(Request $request, $id)
     {
@@ -707,7 +752,7 @@ public function book(Request $request)
     }
 
     /* ============================================================
-     |  Mark as Paid (for on_arrival bookings)
+     |  Mark as Paid
      * ============================================================ */
     public function markAsPaid(Request $request, $id)
     {
@@ -763,7 +808,6 @@ public function book(Request $request)
         $booking->paid_at = now();
         $booking->save();
 
-        // ✅ إشعار العميل بتأكيد الدفع
         $this->safeNotify(function () use ($booking) {
             app(BookingNotificationService::class)->notifyCustomerPaymentConfirmed($booking);
         });
