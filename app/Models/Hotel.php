@@ -24,7 +24,7 @@ class Hotel extends Model
         'property_type',
         'city',
         'area',
-        'rooms',
+        'rooms_count',
         'facilities',
         'cover_image',
         'latitude',
@@ -32,13 +32,14 @@ class Hotel extends Model
         'price_per_night',
         'pay_on_arrival_enabled',
         'user_id',
-            'national_id',
-             'suites_count', 
-               'status',   
-    'phone',
-    'ownership_deed',
-    'commercial_register',
-    'tax_certificate',
+        'national_id',
+        'suites_count', 
+        'status',   
+        'phone',
+        'ownership_deed',
+        'commercial_register',
+        'tax_certificate',
+        'distance_to_haram',
     ];
 
     protected $casts = [
@@ -48,6 +49,7 @@ class Hotel extends Model
         'cover_image'            => 'array',
         'pay_on_arrival_enabled' => 'boolean',
         'suites_count'           => 'integer', 
+       'rooms_count'            => 'integer', 
     ];
 
     /**
@@ -84,6 +86,7 @@ public function toArray(): array
     {
         return $this->hasMany(RoomBooking::class);
     }
+  
 
     // علاقة الغرف
     public function rooms()

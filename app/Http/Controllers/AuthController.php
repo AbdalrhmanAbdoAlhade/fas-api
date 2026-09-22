@@ -276,70 +276,94 @@ public function guestLogin(Request $request)
 
 
 
-
 public function registerHotelOwner(Request $request)
 {
     $validator = Validator::make($request->all(), [
         // بيانات المستخدم
-        'name' => 'required|string|max:255',
-        'email' => 'required|string|email|max:255|unique:users',
-        'phone' => 'nullable|string|max:15|unique:users',
-        'password' => 'required|string|min:8|confirmed',
-
-        'full_name' => 'nullable|string|max:255',
-        'last_name' => 'nullable|string|max:255',
-        'birth_date' => 'nullable|date',
-        'gender' => 'nullable|in:male,female',
-        'national_id' => 'required|string|max:50',
-        'national_img' => 'required|image|max:2048',
-        'image' => 'nullable|image|max:2048',
-        'nationality' => 'required|string|max:255',
+        'name'              => 'required|string|max:255',
+        'email'             => 'required|string|email|max:255|unique:users',
+        'phone'             => 'nullable|string|max:15|unique:users',
+        'password'          => 'required|string|min:8|confirmed',
+        'full_name'         => 'nullable|string|max:255',
+        'last_name'         => 'nullable|string|max:255',
+        'gender'            => 'nullable|in:male,female',
+        'national_id'       => 'required|string|max:50',
+        'national_img'      => 'required|image|max:2048',
+        'image'             => 'nullable|image|max:2048',
+        'nationality'       => 'required|string|max:255',
 
         // وثائق
-        'tax_certificate' => 'required|file|max:4096',
-        'ownership_deed' => 'required|file|max:4096',
+        'tax_certificate'     => 'required|file|max:4096',
+        'ownership_deed'      => 'required|file|max:4096',
         'commercial_register' => 'required|file|max:4096',
 
         // بيانات العقار/الفندق/الشركة
-        'property_type' => 'required|string|max:255',
-        'city' => 'nullable|string|max:255',
-        'address' => 'nullable|string|max:255',
-        'area' => 'nullable|string|max:255',
-        'rooms' => 'nullable|integer',
+        'property_type'     => 'required|string|max:255',
+        'city'              => 'nullable|string|max:255',
+        'address'           => 'nullable|string|max:255',
+        'area'              => 'nullable|string|max:255',
+        'rooms_count'       => 'nullable|integer',
 
-        // إضافات
-        'stars' => 'nullable|numeric|min:1|max:5',
-        'description' => 'nullable|string',
-        'latitude' => 'nullable|numeric',
-        'longitude' => 'nullable|numeric',
-        'price_per_night' => 'nullable|numeric',
+        // إضافات (lat/lng للكيان مش للمستخدم)
+        'stars'             => 'nullable|numeric|min:1|max:5',
+        'description'       => 'nullable|string',
+        'latitude'          => 'nullable|numeric|between:-90,90',
+        'longitude'         => 'nullable|numeric|between:-180,180',
+        'price_per_night'   => 'nullable|numeric',
+        'locale'            => 'nullable|string|in:' . implode(',', LocaleResolver::SUPPORTED_LOCALES),
+        'registration_role' => 'required|in:company_owner,hotel_owner,property_owner,tenant',
 
-        'locale' => 'nullable|string|in:' . implode(',', LocaleResolver::SUPPORTED_LOCALES),
-        'registration_role' => 'required|in:company_owner,hotel_owner,property_owner',
+        // الحساب البنكي
+        'bank_name'         => 'nullable|string|max:255',
+        'iban'              => 'nullable|string|max:50',
+        'bank_account'      => 'nullable|string|max:50',
+
+        // للمستأجر
+        'lease_years'       => 'nullable|integer|min:1|max:50',
+        'lease_contract'    => 'nullable|file|max:4096',
+        'distance_to_haram' => 'nullable|integer|min:0', // بالمتر
+        // غرف الفندق (hotel_owner فقط)
+        'rooms'                   => 'nullable|array|min:1',
+        'rooms.*.name'            => 'required_with:rooms|string|max:255',
+        'rooms.*.type'            => 'nullable|string|max:50',
+        'rooms.*.quantity'        => 'required_with:rooms|integer|min:1',
+        'rooms.*.max_occupancy'   => 'nullable|integer|min:1',
+        'rooms.*.price_per_night' => 'required_with:rooms|numeric|min:0',
+        'rooms.*.size'            => 'nullable|string|max:100',
+        'rooms.*.floor_number'    => 'nullable|string|max:50',
+        'rooms.*.room_number'     => 'nullable|string|max:50',
+        'rooms.*.description'     => 'nullable|string',
+        'rooms.*.cover_image'     => 'nullable|image|mimes:jpeg,png,jpg,webp|max:5120',
+        'rooms.*.images'          => 'nullable|array',
+        'rooms.*.images.*'        => 'image|mimes:jpeg,png,jpg,webp|max:5120',
     ]);
 
     if ($validator->fails()) {
         return response()->json([
             'message' => __('responses.registration_failed'),
-            'errors' => $validator->errors(),
+            'errors'  => $validator->errors(),
         ], 422);
     }
 
-    // ✅ 1. إنشاء المستخدم
+    // ✅ 1. إنشاء المستخدم (من غير lat/lng)
     $data = $request->only([
         'name', 'email', 'phone', 'full_name', 'last_name',
-        'birth_date', 'gender', 'national_id', 'nationality',
-        'property_type', 'city', 'address', 'area', 'rooms',
+        'gender', 'national_id', 'nationality',
+        'property_type', 'city', 'address', 'area',
         'registration_role',
+        'bank_name', 'iban', 'bank_account',
+        'lease_years',
     ]);
 
     $data['password'] = Hash::make($request->password);
-    $data['role'] = 'user';
-    $data['status'] = 'pending';
-    $data['locale'] = LocaleResolver::resolveForRegistration($request->input('locale'), $request->phone);
+    $data['role']     = 'user';
+    $data['status']   = 'pending';
+    $data['locale']   = LocaleResolver::resolveForRegistration($request->input('locale'), $request->phone);
+    
+
     App::setLocale($data['locale']);
 
-    // رفع الملفات
+    // رفع ملفات المستخدم
     if ($request->hasFile('national_img')) {
         $data['national_img'] = '/storage/' . $request->file('national_img')->store('users/national_ids', 'public');
     }
@@ -355,15 +379,17 @@ public function registerHotelOwner(Request $request)
     if ($request->hasFile('commercial_register')) {
         $data['commercial_register'] = '/storage/' . $request->file('commercial_register')->store('users/docs', 'public');
     }
+    if ($request->hasFile('lease_contract')) {
+        $data['lease_contract'] = '/storage/' . $request->file('lease_contract')->store('users/docs', 'public');
+    }
 
     $user = User::create($data);
 
-    // ✅ 2. إنشاء الفندق/العقار/الشركة حسب registration_role
     $registrationRole = $request->input('registration_role');
-    $createdEntity = null;
+    $createdEntity    = null;
 
     // ==========================================
-    // 🏨 HOTEL OWNER
+    // 🏨 HOTEL OWNER → hotels + rooms
     // ==========================================
     if ($registrationRole === 'hotel_owner') {
         $hotel = new \App\Models\Hotel();
@@ -380,35 +406,83 @@ public function registerHotelOwner(Request $request)
             ]));
         }
 
-        $hotel->user_id = $user->id;
-        $hotel->status = 'pending';   // ← ✅ الحالة الابتدائية
-        $hotel->property_type = $request->input('property_type', 'hotel');
-        $hotel->city = $request->input('city');
-        $hotel->address = $request->input('address');
-        $hotel->area = $request->input('area');
-        $hotel->rooms = $request->input('rooms');
-        $hotel->stars = $request->input('stars', 3);
-        $hotel->latitude = $request->input('latitude', 0);
-        $hotel->longitude = $request->input('longitude', 0);
+        $hotel->user_id         = $user->id;
+        $hotel->status          = 'pending';
+        $hotel->property_type   = $request->input('property_type', 'hotel');
+        $hotel->city            = $request->input('city');
+        $hotel->address         = $request->input('address');
+        $hotel->area            = $request->input('area');
+        $hotel->rooms_count = $request->input('rooms_count') ?? count($request->input('rooms', []));
+        $hotel->stars           = $request->input('stars', 3);
+        $hotel->latitude        = $request->input('latitude', 0);
+        $hotel->longitude       = $request->input('longitude', 0);
         $hotel->price_per_night = $request->input('price_per_night', 0);
-        $hotel->country = $request->input('nationality', 'SA');
-        $hotel->images = [];
-        $hotel->cover_image = [];
-        $hotel->details = [];
-        $hotel->facilities = [];
+        $hotel->country         = $request->input('nationality', 'SA');
+      $hotel->distance_to_haram = $request->input('distance_to_haram');
+        $hotel->images          = [];
+        $hotel->cover_image     = [];
+        $hotel->details         = [];
+        $hotel->facilities      = [];
+        $hotel->phone           = $user->phone;
 
-        // نسخ الوثائق
-        $hotel->tax_certificate = $user->tax_certificate;
-        $hotel->ownership_deed = $user->ownership_deed;
+        $hotel->tax_certificate     = $user->tax_certificate;
+        $hotel->ownership_deed      = $user->ownership_deed;
         $hotel->commercial_register = $user->commercial_register;
-        $hotel->national_id = $user->national_img;
+        $hotel->national_id         = $user->national_img;
 
         $hotel->save();
         $createdEntity = $hotel;
-    }
 
+        // إنشاء الغرف + رفع الصور
+        if ($request->filled('rooms') && is_array($request->rooms)) {
+            foreach ($request->rooms as $index => $roomData) {
+                $room = new \App\Models\Room();
+
+                $room->setTranslations('name', array_filter([
+                    'ar' => $roomData['name'] ?? null,
+                    'en' => $roomData['name_en'] ?? null,
+                ]));
+
+                if (!empty($roomData['description'])) {
+                    $room->setTranslations('description', array_filter([
+                        'ar' => $roomData['description'],
+                        'en' => $roomData['description_en'] ?? null,
+                    ]));
+                }
+
+                $room->hotel_id        = $hotel->id;
+                $room->type            = $roomData['type'] ?? null;
+                $room->quantity        = $roomData['quantity'] ?? 1;
+                $room->max_occupancy   = $roomData['max_occupancy'] ?? null;
+                $room->price_per_night = $roomData['price_per_night'] ?? 0;
+                $room->size            = $roomData['size'] ?? null;
+                $room->floor_number    = $roomData['floor_number'] ?? null;
+                $room->room_number     = $roomData['room_number'] ?? null;
+
+                // صورة الغلاف
+                $coverPath = '';
+                if ($request->hasFile("rooms.{$index}.cover_image")) {
+                    $path = $request->file("rooms.{$index}.cover_image")->store('rooms/covers', 'public');
+                    $coverPath = '/' . $path;
+                }
+                $room->cover_image = $coverPath;
+
+                // الصور الإضافية
+                $images = [];
+                if ($request->hasFile("rooms.{$index}.images")) {
+                    foreach ($request->file("rooms.{$index}.images") as $image) {
+                        $path = $image->store('rooms/images', 'public');
+                        $images[] = '/' . $path;
+                    }
+                }
+                $room->images = $images;
+
+                $room->save();
+            }
+        }
+    }
     // ==========================================
-    // 🏡 PROPERTY OWNER
+    // 🏡 PROPERTY OWNER → properties
     // ==========================================
     elseif ($registrationRole === 'property_owner') {
         $property = new \App\Models\Property();
@@ -444,30 +518,28 @@ public function registerHotelOwner(Request $request)
             ]);
         }
 
-        $property->user_id = $user->id;
-        $property->status = 'pending';   // ← ✅
-        $property->country = $request->input('nationality', 'SA');
-        $property->area = $request->input('area');
-        $property->rooms = $request->input('rooms');
-        $property->latitude = $request->input('latitude', 0);
-        $property->longitude = $request->input('longitude', 0);
+        $property->user_id         = $user->id;
+        $property->status          = 'pending';
+        $property->country         = $request->input('nationality', 'SA');
+        $property->area            = $request->input('area');
+        $property->rooms           = $request->input('rooms_count');
+        $property->latitude        = $request->input('latitude', 0);
+        $property->longitude       = $request->input('longitude', 0);
         $property->price_per_night = $request->input('price_per_night', 0);
-        $property->is_available = true;
-        $property->images = [];
-        $property->phone = $user->phone;
+        $property->is_available    = true;
+        $property->images          = [];
+        $property->phone           = $user->phone;
 
-        // نسخ الوثائق
-        $property->national_id = $user->national_img;
-        $property->ownership_deed = $user->ownership_deed;
+        $property->national_id         = $user->national_img;
+        $property->ownership_deed      = $user->ownership_deed;
         $property->commercial_register = $user->commercial_register;
-        $property->tax_certificate = $user->tax_certificate;
+        $property->tax_certificate     = $user->tax_certificate;
 
         $property->save();
         $createdEntity = $property;
     }
-
     // ==========================================
-    // 🏢 COMPANY OWNER
+    // 🏢 COMPANY OWNER → companies
     // ==========================================
     elseif ($registrationRole === 'company_owner') {
         $company = new \App\Models\Company();
@@ -485,30 +557,85 @@ public function registerHotelOwner(Request $request)
         }
 
         $company->user_id = $user->id;
-        $company->status = 'pending';   // ← ✅
+        $company->status  = 'pending';
         $company->address = $request->input('address');
-        $company->phone = $user->phone;
+        $company->phone   = $user->phone;
 
-        // نسخ الوثائق
-        $company->national_id = $user->national_img;
-        $company->ownership_deed = $user->ownership_deed;
+        // lat/lng لو الأعمدة موجودة في جدول companies
+        if (Schema::hasColumn('companies', 'latitude')) {
+            $company->latitude = $request->input('latitude');
+        }
+        if (Schema::hasColumn('companies', 'longitude')) {
+            $company->longitude = $request->input('longitude');
+        }
+
+        $company->national_id         = $user->national_img;
+        $company->ownership_deed      = $user->ownership_deed;
         $company->commercial_register = $user->commercial_register;
-        $company->tax_certificate = $user->tax_certificate;
+        $company->tax_certificate     = $user->tax_certificate;
 
         $company->save();
         $createdEntity = $company;
+    }
+    // ==========================================
+    // 🏠 TENANT → users فقط
+    // ==========================================
+    elseif ($registrationRole === 'tenant') {
+        $createdEntity = null;
+    }
+
+    // ============================================================
+    // واتساب
+    // ============================================================
+    try {
+        $phone = $user->phone;
+
+        if ($phone) {
+            $entityName = 'طلبك';
+
+            if ($registrationRole === 'hotel_owner' && $createdEntity) {
+                $entityName = is_array($createdEntity->name)
+                    ? ($createdEntity->name['ar'] ?? $createdEntity->name['en'] ?? 'فندقك')
+                    : ($createdEntity->name ?? 'فندقك');
+            } elseif ($registrationRole === 'property_owner' && $createdEntity) {
+                $entityName = is_array($createdEntity->title)
+                    ? ($createdEntity->title['ar'] ?? $createdEntity->title['en'] ?? 'عقارك')
+                    : ($createdEntity->title ?? 'عقارك');
+            } elseif ($registrationRole === 'company_owner' && $createdEntity) {
+                $entityName = is_array($createdEntity->name)
+                    ? ($createdEntity->name['ar'] ?? $createdEntity->name['en'] ?? 'شركتك')
+                    : ($createdEntity->name ?? 'شركتك');
+            }
+
+            $typeLabel = match ($registrationRole) {
+                'hotel_owner'    => 'فندق',
+                'property_owner' => 'عقار',
+                'company_owner'  => 'شركة',
+                'tenant'         => 'استئجار',
+                default          => 'طلب',
+            };
+
+            $message = "تم استلام طلب إضافة {$typeLabel} \"{$entityName}\" بنجاح ✅\n\n"
+                     . "طلبك قيد المراجعة حالياً، وسيتم إشعارك بالنتيجة قريباً.\n\n"
+                     . "شكراً لثقتك بنا 🌟";
+
+            \App\Services\WhatsAppService::sendMessage($phone, $message);
+        }
+    } catch (\Exception $e) {
+        \Illuminate\Support\Facades\Log::warning('WhatsApp registration failed: ' . $e->getMessage());
     }
 
     $token = $user->createToken('auth_token')->plainTextToken;
 
     return response()->json([
-        'message' => __('responses.user_registered'),
-        'user' => $user,
-        'entity' => $createdEntity,
+        'message'     => __('responses.user_registered'),
+        'user'        => $user,
+        'entity'      => $createdEntity,
         'entity_type' => $registrationRole,
-        'token' => $token,
+        'token'       => $token,
     ]);
 }
+
 
 public function pendingUsers(Request $request)
 {

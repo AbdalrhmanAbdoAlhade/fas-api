@@ -18,6 +18,7 @@ class User extends Authenticatable
 public const ROLE_EMPLOYEE = 'employee';
     public const ROLE_ADMIN = 'admin';
     public const ROLE_USER = 'user';
+  const ROLE_TENANT         = 'tenant';
     public const ROLE_COORDINATOR = 'coordinator';
     public const ROLE_HOTEL_OWNER = 'hotel_owner';
     public const ROLE_COMPANY_OWNER = 'company_owner';
@@ -51,6 +52,9 @@ public const ROLE_EMPLOYEE = 'employee';
         'area', // المساحة (متر مربع)
         'rooms', // عدد الغرف
         'locale',
+      'bank_name',
+    'iban',
+    'bank_account',
     ];
 
     /**
@@ -96,7 +100,11 @@ public const ROLE_EMPLOYEE = 'employee';
     {
         return $this->role === self::ROLE_USER;
     }
-
+  
+      public function isTenant()
+      {
+          return $this->role === self::ROLE_TENANT;
+      }
     // 🔹 العلاقات
 
         public function company()

@@ -114,93 +114,180 @@ class HotelController extends Controller
     /* ============================================================
      |  فلترة خاصة
      * ============================================================ */
+public function hotelsByBookings(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+        'limit' => 'nullable|integer|min:1',
+    ]);
 
-    public function hotelsByBookings(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'limit' => 'nullable|integer|min:1',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
-
-        $limit = $request->limit ?: 10;
-
-        $hotels = Hotel::visibleTo(Auth::user())
-            ->withCount(['rooms as bookings_count' => function ($query) {
-                $query->select(DB::raw('count(*)'))
-                      ->join('room_bookings', 'rooms.id', '=', 'room_bookings.room_id');
-            }])
-            ->having('bookings_count', '>', 0)
-            ->orderBy('bookings_count', 'desc')
-            ->limit($limit)
-            ->get();
-
-        if ($hotels->isEmpty()) {
-            return response()->json(['message' => __('responses.no_hotels_found_with_bookings')], 404);
-        }
-
-        return response()->json($hotels);
+    if ($validator->fails()) {
+        return response()->json(['errors' => $validator->errors()], 422);
     }
 
-    public function hotelsByStars(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'stars' => 'required|numeric|min:1|max:5',
-        ]);
+    $limit = $request->limit ?: 10;
 
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
+    $hotels = Hotel::visibleTo(Auth::user())
+        ->with(['rooms'])
+        ->withCount('bookings')                    // ✅ عدّل مباشر من العلاقة
+        ->having('bookings_count', '>', 0)
+        ->orderByDesc('bookings_count')
+        ->limit($limit)
+        ->get();
 
-        $stars = $request->stars;
-
-        $hotels = Hotel::visibleTo(Auth::user())
-            ->withAvg('reviews', 'stars')
-            ->having('reviews_avg_stars', '>=', $stars)
-            ->orderByDesc('reviews_avg_stars')
-            ->get();
-
-        if ($hotels->isEmpty()) {
-            return response()->json(['message' => __('responses.hotel_not_found_with_rating')], 404);
-        }
-
-        return response()->json($hotels);
+    if ($hotels->isEmpty()) {
+        return response()->json([
+            'message' => __('responses.no_hotels_found_with_bookings'),
+        ], 404);
     }
 
-    public function nearbyHotels(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'latitude'  => 'required|numeric',
-            'longitude' => 'required|numeric',
-        ]);
+    // حساب المتاح
+    $startDate = $request->query('start_date');
+    $endDate   = $request->query('end_date');
 
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
+    $hotels->each(function ($hotel) use ($startDate, $endDate) {
+        // ✅ استخدم getRelation لتجنب التعارض لو حصل مستقبلاً
+        $rooms = $hotel->getRelation('rooms');
+
+        if ($rooms) {
+            $rooms->each(function ($room) use ($startDate, $endDate) {
+                $booked = 0;
+
+                if ($startDate && $endDate) {
+                    $booked = \App\Models\RoomBooking::where('room_id', $room->id)
+                        ->where('status', '!=', 'cancelled')
+                        ->where(function ($q) use ($startDate, $endDate) {
+                            $q->whereBetween('start_date', [$startDate, $endDate])
+                              ->orWhereBetween('end_date', [$startDate, $endDate])
+                              ->orWhere(function ($q2) use ($startDate, $endDate) {
+                                  $q2->where('start_date', '<=', $startDate)
+                                     ->where('end_date', '>=', $endDate);
+                              });
+                        })
+                        ->sum('number_of_rooms');
+                }
+
+                $room->available = max(0, $room->quantity - $booked);
+            });
         }
+    });
 
-        $latitude  = $request->latitude;
-        $longitude = $request->longitude;
+    return response()->json($hotels);
+}
 
-        $hotels = Hotel::visibleTo(Auth::user())
-            ->select('*', DB::raw("(
-                6371 * acos(
-                    cos(radians($latitude)) * cos(radians(latitude)) *
-                    cos(radians(longitude) - radians($longitude)) +
-                    sin(radians($latitude)) * sin(radians(latitude))
-                )
-            ) AS distance"))
-            ->orderBy('distance', 'asc')
-            ->get();
+  public function hotelsByStars(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+        'stars' => 'required|numeric|min:1|max:5',
+    ]);
 
-        if ($hotels->isEmpty()) {
-            return response()->json(['message' => __('responses.hotel_not_found')], 404);
-        }
-
-        return response()->json($hotels);
+    if ($validator->fails()) {
+        return response()->json(['errors' => $validator->errors()], 422);
     }
 
+    $stars = $request->stars;
+
+    $hotels = Hotel::visibleTo(Auth::user())
+        ->with(['rooms'])
+        ->withAvg('reviews', 'stars')
+        ->having('reviews_avg_stars', '>=', $stars)
+        ->orderByDesc('reviews_avg_stars')
+        ->get();
+
+    if ($hotels->isEmpty()) {
+        return response()->json(['message' => __('responses.hotel_not_found_with_rating')], 404);
+    }
+
+    // حساب المتاح
+    $startDate = request('start_date');
+    $endDate   = request('end_date');
+
+    $hotels->each(function ($hotel) use ($startDate, $endDate) {
+        if ($hotel->rooms) {
+            $hotel->rooms->each(function ($room) use ($startDate, $endDate) {
+                $booked = 0;
+
+                if ($startDate && $endDate) {
+                    $booked = \App\Models\RoomBooking::where('room_id', $room->id)
+                        ->where('status', '!=', 'cancelled')
+                        ->where(function ($q) use ($startDate, $endDate) {
+                            $q->whereBetween('start_date', [$startDate, $endDate])
+                              ->orWhereBetween('end_date', [$startDate, $endDate])
+                              ->orWhere(function ($q2) use ($startDate, $endDate) {
+                                  $q2->where('start_date', '<=', $startDate)
+                                     ->where('end_date', '>=', $endDate);
+                              });
+                        })
+                        ->sum('number_of_rooms');
+                }
+
+                $room->available = max(0, $room->quantity - $booked);
+            });
+        }
+    });
+
+    return response()->json($hotels);
+}
+
+public function nearbyHotels(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+        'latitude'  => 'required|numeric',
+        'longitude' => 'required|numeric',
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json(['errors' => $validator->errors()], 422);
+    }
+
+    $latitude  = $request->latitude;
+    $longitude = $request->longitude;
+
+    $hotels = Hotel::visibleTo(Auth::user())
+        ->with(['rooms'])
+        ->select('*', DB::raw("(
+            6371 * acos(
+                cos(radians($latitude)) * cos(radians(latitude)) *
+                cos(radians(longitude) - radians($longitude)) +
+                sin(radians($latitude)) * sin(radians(latitude))
+            )
+        ) AS distance"))
+        ->orderBy('distance', 'asc')
+        ->get();
+
+    if ($hotels->isEmpty()) {
+        return response()->json(['message' => __('responses.hotel_not_found')], 404);
+    }
+
+    // حساب المتاح
+    $startDate = request('start_date');
+    $endDate   = request('end_date');
+
+    $hotels->each(function ($hotel) use ($startDate, $endDate) {
+        if ($hotel->rooms) {
+            $hotel->rooms->each(function ($room) use ($startDate, $endDate) {
+                $booked = 0;
+
+                if ($startDate && $endDate) {
+                    $booked = \App\Models\RoomBooking::where('room_id', $room->id)
+                        ->where('status', '!=', 'cancelled')
+                        ->where(function ($q) use ($startDate, $endDate) {
+                            $q->whereBetween('start_date', [$startDate, $endDate])
+                              ->orWhereBetween('end_date', [$startDate, $endDate])
+                              ->orWhere(function ($q2) use ($startDate, $endDate) {
+                                  $q2->where('start_date', '<=', $startDate)
+                                     ->where('end_date', '>=', $endDate);
+                              });
+                        })
+                        ->sum('number_of_rooms');
+                }
+
+                $room->available = max(0, $room->quantity - $booked);
+            });
+        }
+    });
+
+    return response()->json($hotels);
+}
     /* ============================================================
      |  CRUD
      * ============================================================ */
@@ -323,7 +410,7 @@ class HotelController extends Controller
             'property_type_id'    => 'nullable|exists:property_types,id',
             'property_type'       => 'nullable|string',
             'area'                => 'nullable|string',
-            'rooms'               => 'nullable|integer',
+           'rooms_count' => 'nullable|integer',   // بدل 'rooms'
             'suites_count'        => 'nullable|integer|min:0',
 
             // ✅ الحقول الجديدة
@@ -452,7 +539,7 @@ class HotelController extends Controller
             'name.ur'       => 'nullable|string',
             'name.tr'       => 'nullable|string',
             'name.id'       => 'nullable|string',
-
+            'rooms_count' => 'nullable|integer|min:0',
             'description'   => 'sometimes|array',
             'description.ar'=> 'sometimes|string',
             'description.en'=> 'nullable|string',
