@@ -205,40 +205,52 @@ class HotelController extends Controller
      |  CRUD
      * ============================================================ */
 
-    public function index(Request $request)
-    {
-        $query = Hotel::visibleTo(Auth::user())
-            ->with('user:id,name,email,phone');
+   public function index(Request $request)
+{
+    $query = Hotel::visibleTo(Auth::user())
+        ->with(['user:id,name,email,phone', 'rooms']);
 
-        if ($request->filled('user_id')) {
-            $query->where('user_id', $request->user_id);
-        }
-
-        $hotels = $query->get();
-
-        return response()->json([
-            'message' => $request->filled('user_id')
-                ? __('responses.user_hotels_list')
-                : __('responses.all_hotels_list'),
-            'hotels'  => $hotels,
-        ]);
+    if ($request->filled('user_id')) {
+        $query->where('user_id', $request->user_id);
     }
 
-    public function show($id)
-    {
-        $hotel = Hotel::visibleTo(Auth::user())
-            ->with('user:id,name,email,phone')
-            ->find($id);
+    $hotels = $query->get();
 
-        if (!$hotel) {
-            return response()->json(['message' => __('responses.hotel_not_found')], 404);
+    // حساب المتاح لو فيه تواريخ
+    $startDate = request('start_date');
+    $endDate   = request('end_date');
+
+    $hotels->each(function ($hotel) use ($startDate, $endDate) {
+        if ($hotel->rooms) {
+            $hotel->rooms->each(function ($room) use ($startDate, $endDate) {
+                $booked = 0;
+
+                if ($startDate && $endDate) {
+                    $booked = \App\Models\RoomBooking::where('room_id', $room->id)
+                        ->where('status', '!=', 'cancelled')
+                        ->where(function ($q) use ($startDate, $endDate) {
+                            $q->whereBetween('start_date', [$startDate, $endDate])
+                              ->orWhereBetween('end_date', [$startDate, $endDate])
+                              ->orWhere(function ($q2) use ($startDate, $endDate) {
+                                  $q2->where('start_date', '<=', $startDate)
+                                     ->where('end_date', '>=', $endDate);
+                              });
+                        })
+                        ->sum('number_of_rooms');
+                }
+
+                $room->available = max(0, $room->quantity - $booked);
+            });
         }
+    });
 
-        return response()->json([
-            'message' => __('responses.hotel_details'),
-            'hotel'   => $hotel,
-        ]);
-    }
+    return response()->json([
+        'message' => $request->filled('user_id')
+            ? __('responses.user_hotels_list')
+            : __('responses.all_hotels_list'),
+        'hotels'  => $hotels,
+    ]);
+}
 
     /* ------------------------------------------------------------
      |  STORE
@@ -372,6 +384,47 @@ class HotelController extends Controller
         return response()->json($hotel, 201);
     }
 
+  public function show($id)
+{
+    $hotel = Hotel::visibleTo(Auth::user())
+        ->with(['user:id,name,email,phone', 'rooms'])
+        ->find($id);
+
+    if (!$hotel) {
+        return response()->json(['message' => __('responses.hotel_not_found')], 404);
+    }
+
+    // حساب المتاح لو فيه تواريخ
+    $startDate = request('start_date');
+    $endDate   = request('end_date');
+
+    if ($hotel->rooms) {
+        $hotel->rooms->each(function ($room) use ($startDate, $endDate) {
+            $booked = 0;
+
+            if ($startDate && $endDate) {
+                $booked = \App\Models\RoomBooking::where('room_id', $room->id)
+                    ->where('status', '!=', 'cancelled')
+                    ->where(function ($q) use ($startDate, $endDate) {
+                        $q->whereBetween('start_date', [$startDate, $endDate])
+                          ->orWhereBetween('end_date', [$startDate, $endDate])
+                          ->orWhere(function ($q2) use ($startDate, $endDate) {
+                              $q2->where('start_date', '<=', $startDate)
+                                 ->where('end_date', '>=', $endDate);
+                          });
+                    })
+                    ->sum('number_of_rooms');
+            }
+
+            $room->available = max(0, $room->quantity - $booked);
+        });
+    }
+
+    return response()->json([
+        'message' => __('responses.hotel_details'),
+        'hotel'   => $hotel,
+    ]);
+}
     /* ------------------------------------------------------------
      |  UPDATE
      * ------------------------------------------------------------ */

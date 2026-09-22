@@ -15,6 +15,7 @@ class Room extends Model
     protected $fillable = [
         'hotel_id',
         'name',
+        'type',
         'cover_image',
         'images',
         'details',
@@ -24,43 +25,43 @@ class Room extends Model
         'floor_number',
         'room_number',
         'price_per_night',
+        'quantity',
+        'max_occupancy',          // ← كان ناقص
     ];
 
     protected $casts = [
-        'images' => 'array',
+        'images'        => 'array',
+        'quantity'      => 'integer',
+        'max_occupancy' => 'integer',  // ← كان ناقص
     ];
 
     /**
      * ✅ ترجمة الحقول المترجمة للنصوص حسب اللغة الحالية
      */
-public function toArray(): array
-{
-    $attributes = parent::toArray();
+    public function toArray(): array
+    {
+        $attributes = parent::toArray();
 
-    // هل المستخدم طلب كل الترجمات؟
-    $wantsAll = strtolower((string) request()->header('Accept-Language')) === 'all';
+        $wantsAll = strtolower((string) request()->header('Accept-Language')) === 'all';
 
-    foreach ($this->getTranslatableAttributes() as $field) {
-        if ($wantsAll) {
-            // ✅ رجّع كل الترجمات
-            $attributes[$field] = $this->getTranslations($field);
-        } else {
-            // ✅ رجّع الترجمة الحالية فقط
-            $attributes[$field] = $this->getTranslation($field, app()->getLocale());
+        foreach ($this->getTranslatableAttributes() as $field) {
+            if ($wantsAll) {
+                $attributes[$field] = $this->getTranslations($field);
+            } else {
+                $attributes[$field] = $this->getTranslation($field, app()->getLocale());
+            }
         }
+
+        return $attributes;
     }
 
-    return $attributes;
-}
     public function hotel()
     {
         return $this->belongsTo(Hotel::class);
     }
 
     /**
-     * ✅ visibleTo مخصص: يخفي الغرفة لو:
-     *    - الغرفة نفسها محظورة
-     *    - أو الفندق بتاعها محظور
+     * ✅ visibleTo مخصص
      */
     public function scopeVisibleTo($query, $user = null)
     {
